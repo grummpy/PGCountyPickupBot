@@ -1,0 +1,11 @@
+{
+  "spatialReference": {"wkid": 4326, "latestWkid": 4326},
+  "candidates": [
+    {
+      "address": "1301 MCCORMICK DR, UPPER MARLBORO, MD, 20774",
+      "score": 98.33,
+      "location": {"x": -76.842135677987, "y": 38.90921517774},
+      "attributes": {"Addr_type": "PointAddress", "Score": 98.33}
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# Copy this file to config.yaml and edit it there.
+# config.yaml is gitignored. Do not put a home address in this example.
+
+source: manual
+include_location: false
+timezone: America/New_York
+reminder_time: "19:00"
+collection_start: "06:00"
+collection_end: "20:00"
+
+# Set a street address only in config.yaml, or pass PGPICKUP_ADDRESS.
+# Leave this null in the public repo.
+address: null
+
+range:
+  start: "2026-01-01"
+  end: "2027-01-31"
+
+# Example weekday pattern for offline use. It is not a real household.
+# Replace it with `pgpickup lookup --address '...' --save`, or set source: lookup.
+schedule:
+  trash:
+    weekdays: [thursday]
+  recycling:
+    weekdays: [thursday]
+    frequency: weekly
+    # anchor: "2026-01-08"   # required only when frequency is alternate
+  yard_waste:
+    weekdays: [monday]
+    # The county publishes year-round Monday organics. Set a season only if
+    # your area is different, for example:
+    # season:
+    #   start: "03-01"
+    #   end: "12-15"
+    season: null
+  bulky:
+    mode: with_trash
+
+google_calendar:
+  enabled: false
+  dry_run: true
+  calendar_id: primary
+  oauth_client_file: secrets/google-oauth-client.json
+  token_file: secrets/google-token.json

@@ -1,0 +1,60 @@
+# Prince George's County holiday collection shifts.
+# This is a curated table, not a live API. The county publishes the rules as
+# an HTML page. Edit this file when a new year is posted.
+# observe:
+#   slide — no collection on the holiday. Each Monday–Friday regular day on
+#           or after the holiday, in that Monday–Sunday week, moves one day
+#           later. Friday moves to Saturday.
+#   none  — collection runs on the normal days.
+#   skip  — drop only the regular day that falls on the holiday.
+source_url: "https://www.princegeorgescountymd.gov/departments-offices/environment/waste-recycling/holiday-waste-collection-schedule"
+checked: 2026-10-06
+holidays:
+  - name: "New Year's Day"
+    date: 2026-01-01
+    observe: slide
+    note: "Thursday. Monday–Wednesday of that week stay put. Thursday moves to Friday January 2. Friday moves to Saturday January 3."
+  - name: "Martin Luther King, Jr. Day"
+    date: 2026-01-19
+    observe: slide
+    note: "Monday. The whole collection week slides one day, including organics. Friday moves to Saturday January 24."
+  - name: "Presidents' Day"
+    date: 2026-02-16
+    observe: none
+    note: "The county collects on Presidents' Day. No days move."
+  - name: "Memorial Day"
+    date: 2026-05-25
+    observe: slide
+    note: "Monday. The whole collection week slides one day, including organics."
+  - name: "Juneteenth"
+    date: 2026-06-19
+    observe: slide
+    note: "Friday. Only Friday moves, to Saturday June 20. Monday–Thursday stay put."
+  - name: "Independence Day"
+    date: 2026-07-04
+    observe: none
+    note: "July 4, 2026 is a Saturday. The dated 2026 table says Monday–Friday do not change, including Friday July 3. The page intro lists Independence Day (observed) as a no-collection holiday; this file follows the dated table."
+  - name: "Labor Day"
+    date: 2026-09-07
+    observe: slide
+    note: "Monday. The whole collection week slides one day, including organics."
+  - name: "Native American Day"
+    date: 2026-10-12
+    observe: none
+    note: "Also called Columbus Day on the county page. Collection runs. No days move."
+  - name: "Veterans Day"
+    date: 2026-11-11
+    observe: none
+    note: "Wednesday. The county collects. No days move."
+  - name: "Thanksgiving Day"
+    date: 2026-11-26
+    observe: slide
+    note: "Thursday, November 26, 2026. Thursday moves to Friday November 27. Friday moves to Saturday November 28. The page heading says Thursday, November 27, 2026, and the Friday row is misprinted as 2025. Encoded from the table body, corrected to 2026. The day after Thanksgiving is a collection day: it is Thursday's makeup, not Friday's regular route."
+  - name: "Christmas Day"
+    date: 2026-12-25
+    observe: slide
+    note: "Friday. Only Friday moves, to Saturday December 26."
+  - name: "New Year's Day"
+    date: 2027-01-01
+    observe: slide
+    note: "Friday. Only Friday moves, to Saturday January 2, 2027. The rest of 2027 was not on the county page when this file was checked."

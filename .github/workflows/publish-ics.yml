@@ -1,0 +1,105 @@
+# Weekly ICS publishing is disabled.
+# To turn it on:
+#   1. Set the repository variable PGPICKUP_PUBLISH_ENABLED to the string true.
+#   2. Set the secret PGPICKUP_ADDRESS to the household address. Never commit it.
+#   3. Uncomment the schedule block below.
+# The job still refuses to run until the variable is true, and the calendar
+# it publishes does not include the street address.
+
+name: Publish pickup calendar
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "15 13 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: vars.PGPICKUP_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install .
+      - name: Write gitignored config from the address secret
+        env:
+          PGPICKUP_ADDRESS: ${{ secrets.PGPICKUP_ADDRESS }}
+        run: |
+          python - << 'PY'
+          import os
+          import pathlib
+          import sys
+
+          import yaml
+
+          address = os.environ.get("PGPICKUP_ADDRESS", "").strip()
+          if not address:
+              sys.exit("PGPICKUP_ADDRESS secret is empty")
+          config = {
+              "source": "lookup",
+              "include_location": False,
+              "timezone": "America/New_York",
+              "reminder_time": "19:00",
+              "address": address,
+              "range": {"start": "2026-01-01", "end": "2027-01-31"},
+              "schedule": {
+                  "recycling": {"frequency": "weekly"},
+                  "yard_waste": {"season": None},
+              },
+              "google_calendar": {"enabled": False, "dry_run": True},
+          }
+          pathlib.Path("config.local.yaml").write_text(
+              yaml.safe_dump(config, sort_keys=False),
+              encoding="utf-8",
+          )
+          print("Wrote config.local.yaml (not committed)")
+          PY
+      - name: Build the calendar
+        env:
+          PGPICKUP_ADDRESS: ${{ secrets.PGPICKUP_ADDRESS }}
+        run: |
+          mkdir -p site
+          pgpickup --config config.local.yaml ics --out site/pickups.ics
+          python - << 'PY'
+          import os
+          import pathlib
+          import sys
+
+          text = pathlib.Path("site/pickups.ics").read_text(encoding="utf-8")
+          address = os.environ.get("PGPICKUP_ADDRESS", "").strip()
+          if address and address.casefold() in text.casefold():
+              sys.exit("ICS contains the address; refusing to publish")
+          PY
+          cat > site/index.html << 'HTML'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>PG County pickups</title>
+          </head>
+          <body>
+            <h1>PG County pickups</h1>
+            <p><a href="pickups.ics">pickups.ics</a></p>
+            <p>This calendar has no street address. Confirm collection days with Prince George's County.</p>
+          </body>
+          </html>
+          HTML
+          rm -f config.local.yaml
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy GitHub Pages
+        uses: actions/deploy-pages@v4
