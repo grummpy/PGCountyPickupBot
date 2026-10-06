@@ -24,7 +24,11 @@ def test_known_public_building_is_only_in_docs():
     for path in ROOT.rglob("*"):
         if not path.is_file():
             continue
-        if any(part in {".git", ".venv", "__pycache__"} for part in path.parts):
+        if any(
+            part in {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "tests"}
+            or part.endswith(".egg-info")
+            for part in path.parts
+        ):
             continue
         if path.suffix in {".jpg", ".png", ".pyc"}:
             continue

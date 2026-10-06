@@ -83,7 +83,11 @@ def reminder_at(service_date: date, options: CalendarOptions) -> datetime:
 
 
 def reminder_minutes(service_date: date, options: CalendarOptions) -> int:
-    delta = collection_start_at(service_date, options) - reminder_at(service_date, options)
+    # Convert both instants to UTC first. Subtracting two datetimes that share
+    # a ZoneInfo ignores the DST offset and counts wall-clock hours instead.
+    start = collection_start_at(service_date, options).astimezone(UTC)
+    reminder = reminder_at(service_date, options).astimezone(UTC)
+    delta = start - reminder
     minutes = int(delta.total_seconds() // 60)
     if minutes <= 0:
         raise ValueError("Reminder time must be before collection starts.")
@@ -143,7 +147,10 @@ def summary_for(occurrence: Occurrence) -> str:
     if not occurrence.shifted:
         return f"{label} pickup"
     nominal = occurrence.nominal_date
-    return f"{label} pickup (moved from {nominal:%A} {nominal.month}/{nominal.day})"
+    moved = f"moved from {nominal:%A} {nominal.month}/{nominal.day}"
+    if occurrence.holiday_name:
+        return f"{label} pickup ({moved}, {occurrence.holiday_name})"
+    return f"{label} pickup ({moved})"
 
 
 def description_for(occurrence: Occurrence, options: CalendarOptions) -> str:

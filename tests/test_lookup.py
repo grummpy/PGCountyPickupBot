@@ -111,12 +111,16 @@ def test_low_score_does_not_query(tmp_path: Path):
 
 
 def test_budget_refuses_a_third_call():
-    transport = FakeTransport(_responses())
-    budget = RequestBudget(transport)
+    class AnyTransport:
+        def get_json(self, url: str, params: dict[str, str]) -> dict:
+            return {"url": url}
+
+    budget = RequestBudget(AnyTransport())
     budget.get_json("https://example.test/a", {})
     budget.get_json("https://example.test/b", {})
     with pytest.raises(LookupError, match="extra HTTP"):
         budget.get_json("https://example.test/c", {})
+    assert budget.calls == MAX_HTTP_REQUESTS
 
 
 def test_paging_flag_is_refused(tmp_path: Path):
