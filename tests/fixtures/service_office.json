@@ -1,0 +1,14 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "Recycle_Day_of_Service": "No Service",
+        "Trash_Day_of_Service1": "No Service",
+        "Bulky_Day_of_Service": "No Service",
+        "Yard_Day_of_Service": "No Service",
+        "CONTRACTOR": "JEDA",
+        "Tier_Service_Area": "903-1"
+      }
+    }
+  ]
+}

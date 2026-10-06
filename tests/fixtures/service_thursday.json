@@ -1,0 +1,14 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "Recycle_Day_of_Service": "Thursday",
+        "Trash_Day_of_Service1": "Thursday",
+        "Bulky_Day_of_Service": "Thursday",
+        "Yard_Day_of_Service": "Monday",
+        "CONTRACTOR": "EXAMPLE",
+        "Tier_Service_Area": "TEST"
+      }
+    }
+  ]
+}
