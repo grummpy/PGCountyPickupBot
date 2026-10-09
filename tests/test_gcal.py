@@ -68,8 +68,13 @@ class FakeEvents:
         self.patched: list[dict] = []
 
     def list(self, **kwargs):
-        assert kwargs["privateExtendedProperty"] == "pgpickup=1"
-        return FakeRequest({"items": list(self.remote)})
+        if "privateExtendedProperty" in kwargs:
+            assert kwargs["privateExtendedProperty"] == "pgpickup=1"
+            items = list(self.remote)
+        else:
+            assert "iCalUID" in kwargs
+            items = [item for item in self.remote if item.get("iCalUID") == kwargs["iCalUID"]]
+        return FakeRequest({"items": items})
 
     def list_next(self, request, payload):
         return None
@@ -171,6 +176,40 @@ def test_dry_run_makes_no_api_call_and_apply_respects_the_flag():
     assert again.counts["noop"] == 1
     assert service.events().patched == []
     assert len(service.events().inserted) == 1
+
+
+def test_foreign_imported_uid_collision_is_left_for_review_without_writing():
+    occurrence = Occurrence("trash", date(2026, 11, 5), date(2026, 11, 5))
+    local = _body(date(2026, 11, 5))
+    service = FakeService()
+    service.events().remote = [
+        {
+            "id": "foreign-import",
+            "iCalUID": local["iCalUID"],
+            "summary": "Imported event",
+            "start": local["start"],
+            "end": local["end"],
+            "extendedProperties": {"private": {}},
+        }
+    ]
+    report = push_calendar(
+        enabled=True,
+        dry_run=False,
+        calendar_id="primary",
+        timezone_name="America/New_York",
+        occurrences=[occurrence],
+        options=OPTIONS,
+        apply=True,
+        service=service,
+        range_start=date(2026, 11, 1),
+        range_end=date(2026, 11, 30),
+    )
+    assert [(action.op, action.google_id) for action in report.actions] == [
+        ("skip_foreign", "foreign-import")
+    ]
+    assert report.counts["skip_foreign"] == 1
+    assert service.events().inserted == []
+    assert service.events().patched == []
 
 
 def test_disabled_push_refuses():
