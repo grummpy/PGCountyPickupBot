@@ -147,12 +147,13 @@ def push_calendar(
         )
     if service is None:
         service = build_google_service(oauth_client_file, token_file)
-    remote = list_our_events(
+    remote = list_uid_collisions(
         service,
         calendar_id=calendar_id,
         timezone_name=timezone_name,
         start=range_start,
         end=range_end,
+        ical_uids=[str(body["iCalUID"]) for body in bodies],
     )
     actions = plan_sync(bodies, remote)
     _apply_actions(service, calendar_id, bodies, actions)
@@ -196,6 +197,52 @@ def list_our_events(
                 found.append(remote)
         request = service.events().list_next(request, payload)
     return found
+
+
+def list_uid_collisions(
+    service,
+    *,
+    calendar_id: str,
+    timezone_name: str,
+    start,
+    end,
+    ical_uids: list[str],
+) -> list[RemoteEvent]:
+    """Find exact UID matches, including unmarked imported calendar events.
+
+    The marker query cannot find a foreign event. Querying only generated UIDs
+    keeps this lookup narrow while leaving collisions for manual review.
+    """
+    if start is None or end is None:
+        raise ConfigError("A date range is required to list Google Calendar events.")
+    zone = ZoneInfo(timezone_name)
+    time_min = datetime.combine(start, time.min, tzinfo=zone).astimezone(UTC).isoformat()
+    time_max = (
+        datetime.combine(end + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC).isoformat()
+    )
+    found: dict[str, RemoteEvent] = {}
+    for uid in dict.fromkeys(ical_uids):
+        request = service.events().list(
+            calendarId=calendar_id,
+            iCalUID=uid,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=False,
+            showDeleted=False,
+            maxResults=250,
+        )
+        pages = 0
+        while request is not None:
+            pages += 1
+            if pages > 10:
+                raise ConfigError("Google Calendar returned too many pages for a pgpickup UID.")
+            payload = request.execute()
+            for item in payload.get("items", []):
+                remote = remote_from_google(item)
+                if remote is not None:
+                    found[remote.google_id] = remote
+            request = service.events().list_next(request, payload)
+    return list(found.values())
 
 
 def remote_from_google(item: dict) -> RemoteEvent | None:
