@@ -95,6 +95,8 @@ def reminder_minutes(service_date: date, options: CalendarOptions) -> int:
 
 
 def build_calendar(occurrences: list[Occurrence], options: CalendarOptions) -> Calendar:
+    if options.timezone != "America/New_York":
+        raise ValueError("ICS export currently supports only America/New_York; choose that timezone.")
     calendar = Calendar()
     calendar.add("prodid", PRODID)
     calendar.add("version", "2.0")

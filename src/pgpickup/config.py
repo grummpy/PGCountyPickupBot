@@ -80,7 +80,9 @@ def parse_config(data: dict, *, config_path: Path | None = None) -> AppConfig:
         raise ConfigError("collection_end must be after collection_start on the same day.")
 
     include_location = parse_bool(data.get("include_location"), "include_location", default=False)
-    address = _clean_address(data.get("address"))
+    # Resolve the environment override before lookup validation, without ever
+    # putting its value in an error message or configuration representation.
+    address = _clean_address(os.environ.get("PGPICKUP_ADDRESS") or data.get("address"))
     source = str(data.get("source") or "manual").strip().casefold()
     if source not in {"manual", "lookup"}:
         raise ConfigError("source must be manual or lookup.")
