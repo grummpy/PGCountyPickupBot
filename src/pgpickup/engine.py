@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from pgpickup.errors import ConfigError
@@ -14,10 +15,145 @@ from pgpickup.models import (
     LookupResult,
     Occurrence,
     Schedule,
+    ScheduleOverride,
     StreamSchedule,
 )
 
 LOOKBACK = timedelta(days=6)
+
+
+@dataclass(frozen=True)
+class OverridePreview:
+    """One reviewed override and its dry-run outcome."""
+
+    override: ScheduleOverride
+    before: Occurrence | None
+    after: Occurrence | None
+    outcome: str
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class Reconciliation:
+    """A local schedule plus the traceable outcome for every override."""
+
+    occurrences: tuple[Occurrence, ...]
+    previews: tuple[OverridePreview, ...]
+
+    @property
+    def conflicts(self) -> tuple[OverridePreview, ...]:
+        return tuple(item for item in self.previews if item.outcome == "blocked")
+
+
+def reconcile_occurrences(
+    occurrences: Sequence[Occurrence],
+    overrides: Sequence[ScheduleOverride],
+    *,
+    as_of: date,
+    range_start: date | None = None,
+    range_end: date | None = None,
+) -> Reconciliation:
+    """Preview and apply only confirmed, non-conflicting local overrides.
+
+    This is intentionally a pure operation: callers can inspect proposed
+    corrections, expired records, and conflicts without reading a county feed
+    or writing an ICS or calendar.  Confirmed entries that no longer match a
+    regular occurrence, or that would create two collections for one stream on
+    the same day, remain blocked until a person corrects the local config.
+    """
+    base = tuple(occurrences)
+    by_key = {(item.stream, item.nominal_date): item for item in base}
+    candidates: dict[tuple[str, date], tuple[ScheduleOverride, Occurrence, Occurrence | None]] = {}
+    previews: dict[tuple[str, date], OverridePreview] = {}
+
+    for override in overrides:
+        key = (override.stream, override.nominal_date)
+        before = by_key.get(key)
+        expired = override.expires_on < as_of
+        if before is None:
+            outside_range = (range_start is not None and override.nominal_date < range_start) or (
+                range_end is not None and override.nominal_date > range_end
+            )
+            previews[key] = OverridePreview(
+                override,
+                None,
+                None,
+                "outside_range" if outside_range else "blocked",
+                (
+                    "The override date is outside the requested range."
+                    if outside_range
+                    else "No matching regular collection occurs on the override nominal_date."
+                ),
+            )
+            continue
+        after = (
+            None
+            if override.service_date is None
+            else Occurrence(
+                stream=before.stream,
+                nominal_date=before.nominal_date,
+                service_date=override.service_date,
+            )
+        )
+        if override.state == "proposed":
+            previews[key] = OverridePreview(
+                override,
+                before,
+                after,
+                "proposed_expired" if expired else "proposed",
+            )
+            continue
+        candidates[key] = (override, before, after)
+        previews[key] = OverridePreview(
+            override,
+            before,
+            after,
+            "applied_expired" if expired else "applied",
+        )
+
+    provisional: list[tuple[tuple[str, date] | None, Occurrence]] = []
+    for item in base:
+        key = (item.stream, item.nominal_date)
+        candidate = candidates.get(key)
+        if candidate is None:
+            provisional.append((None, item))
+        elif candidate[2] is not None:
+            provisional.append((key, candidate[2]))
+
+    collision_keys: set[tuple[str, date]] = set()
+    by_service: dict[tuple[str, date], list[tuple[tuple[str, date] | None, Occurrence]]] = {}
+    for key, item in provisional:
+        by_service.setdefault((item.stream, item.service_date), []).append((key, item))
+    for grouped in by_service.values():
+        if len(grouped) < 2:
+            continue
+        for key, _item in grouped:
+            if key is not None:
+                collision_keys.add(key)
+
+    for key in collision_keys:
+        override, before, after = candidates[key]
+        previews[key] = OverridePreview(
+            override,
+            before,
+            after,
+            "blocked",
+            "This change would create two collections for the same stream on one service date.",
+        )
+
+    final: list[Occurrence] = []
+    for item in base:
+        key = (item.stream, item.nominal_date)
+        candidate = candidates.get(key)
+        if candidate is None or key in collision_keys:
+            final.append(item)
+        elif candidate[2] is not None:
+            final.append(candidate[2])
+    final.sort(key=lambda item: (item.service_date, STREAM_ORDER[item.stream], item.nominal_date))
+    ordered_previews = tuple(
+        previews[key] for key in sorted(previews, key=lambda item: (item[1], STREAM_ORDER[item[0]]))
+    )
+    return Reconciliation(occurrences=tuple(final), previews=ordered_previews)
 
 
 def resolve_service_date(

@@ -17,8 +17,10 @@ from pgpickup.config import (
     render_saved_config,
 )
 from pgpickup.engine import (
+    OverridePreview,
     coverage_warning,
     expand_schedule,
+    reconcile_occurrences,
     schedule_from_lookup,
     upcoming,
 )
@@ -77,6 +79,15 @@ def _main(argv: list[str] | None) -> int:
     schedule.add_argument("--start")
     schedule.add_argument("--end")
 
+    reconcile = sub.add_parser(
+        "reconcile",
+        help="Preview local dated collection overrides without network or calendar writes.",
+    )
+    reconcile.add_argument("--json", action="store_true")
+    reconcile.add_argument("--start")
+    reconcile.add_argument("--end")
+    reconcile.add_argument("--as-of", help="Review expiry as YYYY-MM-DD (defaults to today).")
+
     ics = sub.add_parser("ics", help="Write an RFC 5545 calendar.")
     ics.add_argument("--out", default="pickups.ics")
     ics.add_argument("--start")
@@ -98,6 +109,8 @@ def _main(argv: list[str] | None) -> int:
     config = apply_address_env(_require_config(args.config))
     if args.command == "schedule":
         return _schedule(args, config)
+    if args.command == "reconcile":
+        return _reconcile(args, config)
     if args.command == "ics":
         return _ics(args, config)
     if args.command == "next":
@@ -126,6 +139,12 @@ def _lookup(args, config: AppConfig | None) -> int:
             raise ConfigError("lookup --save needs a config file. Copy config.example.yaml first.")
         destination = Path(args.save)
         assert_safe_save_path(destination)
+        if result.missing_streams:
+            missing = ", ".join(_stream_label(item) for item in result.missing_streams)
+            raise ConfigError(
+                "County layer omitted collection fields for "
+                f"{missing}. Not writing a partial schedule; confirm it with the county."
+            )
         if not _any_collection(result):
             raise ConfigError(
                 "County layer reports no collection days. Not writing a schedule. "
@@ -147,8 +166,7 @@ def replace_address(config: AppConfig, address: str) -> AppConfig:
 def _schedule(args, config: AppConfig) -> int:
     table = load_holiday_table(config.holidays_file)
     start, end = _range(args, config)
-    schedule = _active_schedule(config)
-    occurrences = expand_schedule(schedule, table.holidays, start, end)
+    schedule, occurrences = _reconciled_occurrences(config, table.holidays, start, end)
     rows = upcoming(occurrences, date.today(), args.limit)
     warning = coverage_warning(table, end)
     if args.json:
@@ -168,8 +186,7 @@ def _schedule(args, config: AppConfig) -> int:
 def _ics(args, config: AppConfig) -> int:
     table = load_holiday_table(config.holidays_file)
     start, end = _range(args, config)
-    schedule = _active_schedule(config)
-    occurrences = expand_schedule(schedule, table.holidays, start, end)
+    _schedule, occurrences = _reconciled_occurrences(config, table.holidays, start, end)
     payload = render_ics(occurrences, _options(config))
     destination = Path(args.out)
     destination.write_bytes(payload)
@@ -179,8 +196,12 @@ def _ics(args, config: AppConfig) -> int:
 
 def _next(args, config: AppConfig) -> int:
     table = load_holiday_table(config.holidays_file)
-    schedule = _active_schedule(config)
-    occurrences = expand_schedule(schedule, table.holidays, config.range_start, config.range_end)
+    _schedule, occurrences = _reconciled_occurrences(
+        config,
+        table.holidays,
+        config.range_start,
+        config.range_end,
+    )
     rows = upcoming(occurrences, date.today(), args.limit)
     if args.json:
         print(json.dumps([occurrence_dict(item) for item in rows], indent=2))
@@ -196,8 +217,7 @@ def _next(args, config: AppConfig) -> int:
 def _push(args, config: AppConfig) -> int:
     table = load_holiday_table(config.holidays_file)
     start, end = _range(args, config)
-    schedule = _active_schedule(config)
-    occurrences = expand_schedule(schedule, table.holidays, start, end)
+    _schedule, occurrences = _reconciled_occurrences(config, table.holidays, start, end)
     report = push_calendar(
         enabled=config.google_enabled,
         dry_run=config.google_dry_run,
@@ -227,6 +247,37 @@ def _push(args, config: AppConfig) -> int:
     return 0
 
 
+def _reconcile(args, config: AppConfig) -> int:
+    """Inspect local overrides without invoking lookup, ICS, or calendar APIs."""
+    if config.source != "manual":
+        raise ConfigError(
+            "reconcile is offline-only and requires source: manual. "
+            "Run lookup --save first, then review the saved local schedule."
+        )
+    table = load_holiday_table(config.holidays_file)
+    start, end = _range(args, config)
+    if args.as_of:
+        try:
+            as_of = date.fromisoformat(args.as_of)
+        except ValueError as exc:
+            raise ConfigError("--as-of must be YYYY-MM-DD.") from exc
+    else:
+        as_of = date.today()
+    occurrences = expand_schedule(config.schedule, table.holidays, start, end)
+    reconciliation = reconcile_occurrences(
+        occurrences,
+        config.overrides,
+        as_of=as_of,
+        range_start=start,
+        range_end=end,
+    )
+    if args.json:
+        print(json.dumps(_reconciliation_dict(reconciliation), indent=2))
+    else:
+        print(_format_reconciliation(reconciliation, as_of))
+    return 0
+
+
 def _active_schedule(config: AppConfig) -> Schedule:
     if config.source == "manual":
         return config.schedule
@@ -238,6 +289,29 @@ def _active_schedule(config: AppConfig) -> Schedule:
         cache_days=config.lookup_cache_days,
     )
     return schedule_from_lookup(result, config.schedule)
+
+
+def _reconciled_occurrences(
+    config: AppConfig,
+    holidays,
+    start: date,
+    end: date,
+) -> tuple[Schedule, list[Occurrence]]:
+    schedule = _active_schedule(config)
+    base = expand_schedule(schedule, holidays, start, end)
+    reconciliation = reconcile_occurrences(
+        base,
+        config.overrides,
+        as_of=date.today(),
+        range_start=start,
+        range_end=end,
+    )
+    if reconciliation.conflicts:
+        raise ConfigError(
+            "Confirmed collection overrides are blocked by conflicts. "
+            "Run pgpickup reconcile to review them before exporting or pushing."
+        )
+    return schedule, list(reconciliation.occurrences)
 
 
 def _options(config: AppConfig) -> CalendarOptions:
@@ -374,6 +448,9 @@ def _format_lookup(result: LookupResult) -> str:
         lines.append("This point is not inside a county collection polygon.")
     elif not _any_collection(result):
         lines.append("This address is in the county layer but has no county collection days.")
+    if result.missing_streams:
+        missing = ", ".join(_stream_label(item) for item in result.missing_streams)
+        lines.append(f"County layer omitted fields for: {missing}. Do not save a partial schedule.")
     return "\n".join(lines)
 
 
@@ -397,6 +474,8 @@ def _lookup_dict(result: LookupResult) -> dict:
         "score": result.score,
         "cached": result.cached,
         "in_layer": result.in_layer,
+        "incomplete": bool(result.missing_streams),
+        "missing_streams": list(result.missing_streams),
         "contractor": result.contractor,
         "tier": result.tier,
         "trash": field(result.trash),
@@ -416,3 +495,56 @@ def _any_collection(result: LookupResult) -> bool:
             result.bulky.appointment,
         )
     )
+
+
+def _stream_label(stream: str) -> str:
+    return STREAM_LABELS.get(stream, stream)
+
+
+def _reconciliation_dict(reconciliation) -> dict:
+    return {
+        "offline": True,
+        "mutated": False,
+        "occurrences": [occurrence_dict(item) for item in reconciliation.occurrences],
+        "overrides": [_override_preview_dict(item) for item in reconciliation.previews],
+    }
+
+
+def _override_preview_dict(preview: OverridePreview) -> dict:
+    override = preview.override
+    return {
+        "stream": override.stream,
+        "nominal_date": override.nominal_date.isoformat(),
+        "service_date": override.service_date.isoformat() if override.service_date else None,
+        "expires_on": override.expires_on.isoformat(),
+        "state": override.state,
+        "outcome": preview.outcome,
+        "detail": preview.detail or None,
+        "note": override.note or None,
+    }
+
+
+def _format_reconciliation(reconciliation, as_of: date) -> str:
+    lines = [
+        "Offline reconciliation preview",
+        "  No county lookup, ICS export, cache write, or calendar mutation was performed.",
+        f"  Expiry reviewed as of: {as_of.isoformat()}",
+    ]
+    if not reconciliation.previews:
+        lines.append("  No local overrides are configured.")
+        return "\n".join(lines)
+    lines.append("\nOverrides")
+    for preview in reconciliation.previews:
+        override = preview.override
+        if preview.before is None:
+            before, after = "not in range", "not evaluated"
+        else:
+            before = preview.before.service_date.isoformat()
+            after = "cancel" if preview.after is None else preview.after.service_date.isoformat()
+        detail = f" — {preview.detail}" if preview.detail else ""
+        lines.append(
+            "  "
+            f"{override.stream} {override.nominal_date.isoformat()}: {before} -> {after} "
+            f"[{override.state}; {preview.outcome}]{detail}"
+        )
+    return "\n".join(lines)
