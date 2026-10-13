@@ -126,3 +126,22 @@ def test_new_year_shift_is_a_valid_event():
     assert start.date() == date(2026, 1, 2)
     assert "New Year" in str(event.get("summary"))
     assert str(event.get("uid")).startswith("trash-2026-01-01@")
+
+
+def test_export_marks_holiday_table_provenance_and_out_of_coverage_dates():
+    table = load_holiday_table()
+    options = CalendarOptions(
+        now=OPTIONS.now,
+        holiday_checked=table.checked,
+        holiday_coverage_start=min(item.date for item in table.holidays),
+        holiday_coverage_end=max(item.date for item in table.holidays),
+    )
+    inside = Occurrence("trash", date(2026, 10, 8), date(2026, 10, 8))
+    outside = Occurrence("trash", date(2027, 2, 4), date(2027, 2, 4))
+    calendar = Calendar.from_ical(render_ics([inside, outside], options))
+    inside_event = _event_by_uid(calendar, inside.nominal_date)
+    outside_event = _event_by_uid(calendar, outside.nominal_date)
+    assert "Holiday shift table checked 2026-10-06" in str(inside_event.get("description"))
+    assert "supported dates: 2026-01-01 through 2027-01-01" in str(inside_event.get("description"))
+    assert "Holiday coverage limit" not in str(inside_event.get("description"))
+    assert "Holiday coverage limit" in str(outside_event.get("description"))
