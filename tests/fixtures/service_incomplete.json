@@ -1,0 +1,11 @@
+{
+  "features": [
+    {
+      "attributes": {
+        "Trash_Day_of_Service1": "Thursday",
+        "CONTRACTOR": "EXAMPLE",
+        "Tier_Service_Area": "PARTIAL"
+      }
+    }
+  ]
+}

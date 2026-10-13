@@ -16,6 +16,7 @@ WEEKDAY_NAMES: tuple[str, ...] = (
 )
 
 STREAMS: tuple[str, ...] = ("trash", "recycling", "yard_waste", "bulky")
+OVERRIDE_STATES: frozenset[str] = frozenset({"proposed", "confirmed"})
 
 STREAM_ORDER: dict[str, int] = {name: index for index, name in enumerate(STREAMS)}
 
@@ -108,6 +109,25 @@ class Occurrence:
         return self.service_date != self.nominal_date
 
 
+@dataclass(frozen=True)
+class ScheduleOverride:
+    """A short-lived, one-date correction from a reviewed local notice.
+
+    Overrides are deliberately tied to the regular collection date instead of
+    a recurring weekday.  A proposed override is shown by ``reconcile`` but
+    never changes an export; a confirmed override can change or cancel one
+    matching occurrence.  ``expires_on`` keeps the record's review horizon
+    visible after the affected date has passed.
+    """
+
+    stream: str
+    nominal_date: date
+    service_date: date | None
+    expires_on: date
+    state: str = "proposed"
+    note: str = ""
+
+
 def occurrence_uid(occurrence: Occurrence) -> str:
     """Stable id for one logical pickup, based on the regular weekday date."""
     nominal = occurrence.nominal_date.isoformat()
@@ -149,6 +169,7 @@ class LookupResult:
     contractor: str
     tier: str
     polygon_count: int
+    missing_streams: tuple[str, ...] = ()
     cached: bool = False
 
     @property

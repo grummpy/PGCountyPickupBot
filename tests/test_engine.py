@@ -10,12 +10,13 @@ from tests.conftest import weekly
 from pgpickup.engine import (
     coverage_warning,
     expand_schedule,
+    reconcile_occurrences,
     resolve_service_date,
     schedule_from_lookup,
 )
 from pgpickup.errors import ConfigError
 from pgpickup.holidays import load_holiday_table
-from pgpickup.models import DayField, Holiday, LookupResult, StreamSchedule
+from pgpickup.models import DayField, Holiday, LookupResult, ScheduleOverride, StreamSchedule
 
 TABLE = load_holiday_table()
 
@@ -297,3 +298,106 @@ def test_season_fields_are_month_days():
     assert spec.in_season(date(2026, 12, 1))
     assert spec.in_season(date(2026, 1, 15))
     assert not spec.in_season(date(2026, 6, 1))
+
+
+def test_reconciliation_keeps_proposals_off_exports_and_applies_confirmed_dates():
+    base = expand_schedule(
+        weekly(trash=(3,), recycling=(), yard=(), bulky_mode="none"),
+        (),
+        date(2026, 3, 1),
+        date(2026, 3, 14),
+    )
+    result = reconcile_occurrences(
+        base,
+        (
+            ScheduleOverride(
+                stream="trash",
+                nominal_date=date(2026, 3, 5),
+                service_date=date(2026, 3, 6),
+                expires_on=date(2026, 3, 6),
+                state="proposed",
+            ),
+            ScheduleOverride(
+                stream="trash",
+                nominal_date=date(2026, 3, 12),
+                service_date=date(2026, 3, 13),
+                expires_on=date(2026, 3, 13),
+                state="confirmed",
+            ),
+        ),
+        as_of=date(2026, 3, 4),
+    )
+    resolved = {item.nominal_date: item.service_date for item in result.occurrences}
+    assert resolved[date(2026, 3, 5)] == date(2026, 3, 5)
+    assert resolved[date(2026, 3, 12)] == date(2026, 3, 13)
+    assert [item.outcome for item in result.previews] == ["proposed", "applied"]
+
+
+def test_reconciliation_blocks_duplicate_service_dates_and_marks_expired_cancellations():
+    base = expand_schedule(
+        weekly(trash=(3,), recycling=(), yard=(), bulky_mode="none"),
+        (),
+        date(2026, 3, 1),
+        date(2026, 3, 14),
+    )
+    blocked = reconcile_occurrences(
+        base,
+        (
+            ScheduleOverride(
+                stream="trash",
+                nominal_date=date(2026, 3, 5),
+                service_date=date(2026, 3, 12),
+                expires_on=date(2026, 3, 12),
+                state="confirmed",
+            ),
+        ),
+        as_of=date(2026, 3, 4),
+    )
+    assert len(blocked.conflicts) == 1
+    assert blocked.conflicts[0].outcome == "blocked"
+    assert [item.service_date for item in blocked.occurrences] == [
+        date(2026, 3, 5),
+        date(2026, 3, 12),
+    ]
+
+    cancelled = reconcile_occurrences(
+        base,
+        (
+            ScheduleOverride(
+                stream="trash",
+                nominal_date=date(2026, 3, 12),
+                service_date=None,
+                expires_on=date(2026, 3, 12),
+                state="confirmed",
+            ),
+        ),
+        as_of=date(2026, 3, 13),
+    )
+    assert [item.nominal_date for item in cancelled.occurrences] == [date(2026, 3, 5)]
+    assert cancelled.previews[0].outcome == "applied_expired"
+
+
+def test_reconciliation_does_not_block_a_range_that_excludes_an_override_date():
+    base = expand_schedule(
+        weekly(trash=(3,), recycling=(), yard=(), bulky_mode="none"),
+        (),
+        date(2026, 4, 1),
+        date(2026, 4, 30),
+    )
+    result = reconcile_occurrences(
+        base,
+        (
+            ScheduleOverride(
+                stream="trash",
+                nominal_date=date(2026, 3, 5),
+                service_date=date(2026, 3, 6),
+                expires_on=date(2026, 3, 6),
+                state="confirmed",
+            ),
+        ),
+        as_of=date(2026, 4, 1),
+        range_start=date(2026, 4, 1),
+        range_end=date(2026, 4, 30),
+    )
+    assert result.conflicts == ()
+    assert result.previews[0].outcome == "outside_range"
