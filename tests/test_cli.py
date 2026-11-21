@@ -23,6 +23,8 @@ def test_schedule_next_and_ics(tmp_path: Path):
     text = raw.decode("utf-8")
     assert "McCormick" not in text
     assert "123 Secret" not in text
+    assert "Holiday shift table checked 2026-10-06" in text
+    assert "supported dates: 2026-01-01 through 2027-01-01" in text
     assert main(["--config", str(config), "push"]) == 1
 
 
