@@ -60,6 +60,7 @@ def test_office_fixture_is_no_service_and_cached(tmp_path: Path):
     assert first.trash == DayField()
     assert first.contractor == "JEDA"
     assert first.tier == "903-1"
+    assert first.missing_streams == ()
     assert first.cached is False
     assert "McCormick" not in str(tmp_path.iterdir())
     cached_name = next(tmp_path.iterdir()).name
@@ -160,8 +161,33 @@ def test_day_values():
     assert parse_day_value("No Service") == DayField()
     assert parse_day_value("Call 311 to Schedule").appointment is True
     assert parse_day_value("Monday").weekdays == (0,)
+    assert parse_day_value("Monday and Thursday").weekdays == (0, 3)
+    assert parse_day_value("Tuesday / Friday").weekdays == (1, 4)
     with pytest.raises(LookupError, match="Unrecognized"):
         parse_day_value("Funday")
+
+
+def test_synthetic_incomplete_and_multiple_day_results_are_distinguished(tmp_path: Path):
+    moment = datetime(2026, 10, 6, tzinfo=UTC)
+    incomplete = lookup_address(
+        "1 Example Rd",
+        cache_dir=tmp_path / "incomplete",
+        transport=FakeTransport(_responses("service_incomplete.json")),
+        now=moment,
+    )
+    assert incomplete.trash.weekdays == (3,)
+    assert incomplete.missing_streams == ("recycling", "yard_waste", "bulky")
+
+    multiple = lookup_address(
+        "2 Example Rd",
+        cache_dir=tmp_path / "multiple",
+        transport=FakeTransport(_responses("service_multiple_days.json")),
+        now=moment,
+    )
+    assert multiple.trash.weekdays == (1, 4)
+    assert multiple.recycling.weekdays == (1, 4)
+    assert multiple.yard_waste.weekdays == (0,)
+    assert multiple.missing_streams == ()
 
 
 def test_http_error_is_one_request_and_hides_the_query():

@@ -56,6 +56,7 @@ Holiday edits belong in the YAML table. `observe: slide` moves Monday–Friday r
 ```bash
 pgpickup lookup --address '1301 McCormick Drive, Largo, MD 20774'
 pgpickup schedule
+pgpickup reconcile
 pgpickup next
 pgpickup ics --out pickups.ics
 pgpickup push
@@ -64,6 +65,12 @@ pgpickup push
 `lookup` geocodes the address and queries the county Trash Services layer. The address above is the county administration building printed on the department's contact page, not a house. On 2026-10-06 that point was inside the layer and marked `No Service`. Add `--save` to write the returned weekdays into gitignored `config.yaml`. A repeat lookup uses the cache and does not call the county again. `--refresh` bypasses the cache and still makes only one geocode request and one map query.
 
 `schedule` prints the weekly pattern and the next shifted dates. `next` prints the next pickups. `ics` writes a calendar for the configured range (past dates in that range are included, so a year can be imported).
+
+### Dated local overrides
+
+When the county issues a short-lived, dated exception, add an `overrides` entry to the private `config.yaml`, then run `pgpickup reconcile`. Each entry names one stream and its regular `nominal_date`, has an `expires_on` date, and starts as `state: proposed`. The reconciliation command is offline: it reads only the local configuration and holiday table, does not query the county, write a cache or ICS file, or call Google Calendar. It shows proposed changes, expired records, and conflicts.
+
+Only `state: confirmed` changes an event in `schedule`, `next`, `ics`, or a Google Calendar dry-run. A confirmed correction is blocked rather than exported if it does not match a regular collection or would create two events for the same stream on one service day. Use one dated correction per regular date; do not model a recurring county schedule change as an override.
 
 Import `pickups.ics` into Google Calendar, Apple Calendar, or any other RFC 5545 client, or subscribe to a copy you host yourself. Events use `America/New_York`. The default reminder is 7:00 p.m. Eastern the evening before, which is after the county's 6:00 p.m. set-out time. The event itself runs 6:00 a.m. to 8:00 p.m., the county's published collection window. The street address is omitted unless `include_location: true`.
 
@@ -92,6 +99,7 @@ pytest
 - The Thanksgiving heading on the county page does not match the table body, and Independence Day 2026 (a Saturday) does not slide Friday, July 3 in the dated table. Details are in `docs/SOURCES.md` and the YAML notes.
 - Some municipalities are not on the county route. The sample county building returns `No Service`.
 - The lookup layer has one trash day field. A second trash day, if you have one, has to be added by hand.
+- A county response that omits one or more stream fields is shown as incomplete and cannot be saved as a partial local schedule. Explicit `No Service` is distinct from an omitted field. Multiple weekday values are preserved when the public layer returns them, but should still be confirmed with the county.
 - Yard trim is year-round on the county's residential page. The season window in the config is there for an area whose rules differ. It does nothing when `season` is null.
 - Curbside bulky means up to four items on collection day. Appliances, scrap tires, electronics, and scrap metal need a PGC311 appointment and are not booked by this program.
 - Weather delays are not in the feed.

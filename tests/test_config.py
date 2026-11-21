@@ -156,6 +156,72 @@ def test_saved_render_quotes_the_address():
     assert "dry_run: true" in text
 
 
+def test_dated_overrides_require_expiry_and_preserve_review_state_when_saved():
+    data = deepcopy(base())
+    data["overrides"] = [
+        {
+            "stream": "trash",
+            "nominal_date": "2026-03-05",
+            "service_date": "2026-03-06",
+            "expires_on": "2026-03-06",
+            "state": "confirmed",
+            "note": "Synthetic county notice",
+        },
+        {
+            "stream": "yard_waste",
+            "nominal_date": "2026-03-09",
+            "service_date": None,
+            "expires_on": "2026-03-09",
+        },
+    ]
+    config = parse_config(data)
+    assert [item.state for item in config.overrides] == ["confirmed", "proposed"]
+    saved = render_saved_config(config, config.schedule)
+    assert "overrides:" in saved
+    assert "state: confirmed" in saved
+    assert "service_date: null" in saved
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        (
+            {
+                "stream": "trash",
+                "nominal_date": "2026-03-05",
+                "service_date": "2026-03-06",
+                "expires_on": "2026-03-04",
+            },
+            "expires_on",
+        ),
+        (
+            {
+                "stream": "compost",
+                "nominal_date": "2026-03-05",
+                "service_date": "2026-03-06",
+                "expires_on": "2026-03-06",
+            },
+            "stream",
+        ),
+        (
+            {
+                "stream": "trash",
+                "nominal_date": "2026-03-05",
+                "service_date": "2026-03-06",
+                "expires_on": "2026-03-06",
+                "state": "applied",
+            },
+            "state",
+        ),
+    ],
+)
+def test_invalid_dated_overrides_are_rejected(override, message):
+    data = deepcopy(base())
+    data["overrides"] = [override]
+    with pytest.raises(ConfigError, match=message):
+        parse_config(data)
+
+
 def test_holiday_file_rejects_duplicates_and_bad_observe(tmp_path: Path):
     path = tmp_path / "holidays.yaml"
     path.write_text(

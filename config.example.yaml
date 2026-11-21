@@ -36,6 +36,18 @@ schedule:
   bulky:
     mode: with_trash
 
+# Short-lived changes from a dated county notice can be reviewed locally before
+# changing any calendar export.  Keep proposals as `state: proposed`; only a
+# reviewed `confirmed` entry changes that one nominal collection date.  Every
+# entry needs an expiration date so a stale exception remains visible.
+# overrides:
+#   - stream: trash
+#     nominal_date: "2026-12-24"
+#     service_date: "2026-12-26"  # null cancels one collection
+#     expires_on: "2026-12-26"
+#     state: proposed
+#     note: "Copy the dated county notice here; do not use a recurring override."
+
 google_calendar:
   enabled: false
   dry_run: true

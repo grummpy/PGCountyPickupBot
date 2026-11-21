@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -121,13 +122,29 @@ def parse_day_value(value: object) -> DayField:
     if text.casefold() == "call 311 to schedule":
         return DayField(appointment=True)
     try:
-        return DayField(weekdays=(parse_weekday(text),))
+        parts = [item.strip() for item in re.split(r"\s*(?:,|/|&|\band\b)\s*", text, flags=re.I)]
+        if not parts or any(not item for item in parts):
+            raise ValueError("empty day")
+        weekdays = tuple(sorted(parse_weekday(item) for item in parts))
+        if len(set(weekdays)) != len(weekdays):
+            raise ValueError("duplicate day")
+        return DayField(weekdays=weekdays)
     except ValueError as exc:
         raise LookupError(f"Unrecognized collection day {value!r} from the county layer.") from exc
 
 
 def attributes_to_days(attributes: dict) -> dict[str, DayField]:
     return {stream: parse_day_value(attributes.get(field)) for field, stream in _FIELD_TO_STREAM}
+
+
+def missing_streams(attributes: dict) -> tuple[str, ...]:
+    """Report fields the county payload omitted rather than calling them no-service."""
+    missing: list[str] = []
+    for field, stream in _FIELD_TO_STREAM:
+        value = attributes.get(field)
+        if field not in attributes or value is None or not str(value).strip():
+            missing.append(stream)
+    return tuple(missing)
 
 
 def choose_feature(features: list[dict]) -> dict | None:
@@ -227,6 +244,7 @@ def _lookup_from_geocode(address: str, geocode: dict, budget: RequestBudget) -> 
         raise LookupError("County layer returned an unexpected feature list.")
     chosen = choose_feature(features)
     days = attributes_to_days(chosen or {})
+    missing = missing_streams(chosen or {})
     return LookupResult(
         query_address=address,
         matched_address=str(best.get("address") or address),
@@ -240,6 +258,7 @@ def _lookup_from_geocode(address: str, geocode: dict, budget: RequestBudget) -> 
         contractor=str((chosen or {}).get("CONTRACTOR") or ""),
         tier=str((chosen or {}).get("Tier_Service_Area") or ""),
         polygon_count=len(features),
+        missing_streams=missing,
         cached=False,
     )
 
@@ -290,6 +309,7 @@ def _payload(result: LookupResult, now: datetime) -> dict:
         "contractor": result.contractor,
         "tier": result.tier,
         "polygon_count": result.polygon_count,
+        "missing_streams": list(result.missing_streams),
     }
 
 
@@ -313,6 +333,7 @@ def _result_from_payload(payload: dict, *, cached: bool) -> LookupResult:
         contractor=str(payload.get("contractor") or ""),
         tier=str(payload.get("tier") or ""),
         polygon_count=int(payload["polygon_count"]),
+        missing_streams=tuple(str(item) for item in payload.get("missing_streams") or ()),
         cached=cached,
     )
 

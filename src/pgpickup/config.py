@@ -14,7 +14,15 @@ import yaml
 from pgpickup.engine import validate_lookup_template, validate_manual_schedule
 from pgpickup.errors import ConfigError
 from pgpickup.holidays import default_holidays_path
-from pgpickup.models import BULKY_MODES, Schedule, StreamSchedule, parse_weekday
+from pgpickup.models import (
+    BULKY_MODES,
+    OVERRIDE_STATES,
+    STREAMS,
+    Schedule,
+    ScheduleOverride,
+    StreamSchedule,
+    parse_weekday,
+)
 
 EXAMPLE_CONFIG_NAMES = frozenset({"config.example.yaml"})
 
@@ -31,6 +39,7 @@ class AppConfig:
     range_start: date
     range_end: date
     schedule: Schedule
+    overrides: tuple[ScheduleOverride, ...]
     holidays_file: Path
     cache_dir: Path
     lookup_cache_days: int
@@ -106,6 +115,8 @@ def parse_config(data: dict, *, config_path: Path | None = None) -> AppConfig:
         if not address:
             raise ConfigError("source lookup requires address in the config or PGPICKUP_ADDRESS.")
 
+    overrides = parse_overrides(data.get("overrides"))
+
     holidays_raw = data.get("holidays_file")
     if holidays_raw:
         holidays_file = _resolve_path(base, holidays_raw, "holidays_file")
@@ -146,6 +157,7 @@ def parse_config(data: dict, *, config_path: Path | None = None) -> AppConfig:
         range_start=range_start,
         range_end=range_end,
         schedule=schedule,
+        overrides=overrides,
         holidays_file=holidays_file,
         cache_dir=cache_dir,
         lookup_cache_days=cache_days,
@@ -187,6 +199,55 @@ def parse_schedule(data: dict, *, lookup_source: bool) -> Schedule:
         bulky=bulky,
         bulky_mode=mode,
     )
+
+
+def parse_overrides(raw: object) -> tuple[ScheduleOverride, ...]:
+    """Parse intentionally bounded local schedule corrections.
+
+    An override must name its regular date, its expiration date, and whether
+    the user has confirmed it.  Keeping proposed records in the config makes
+    the offline reconciliation output reviewable without changing calendars.
+    """
+    if raw in (None, []):
+        return ()
+    if not isinstance(raw, list):
+        raise ConfigError("overrides must be a list.")
+    parsed: list[ScheduleOverride] = []
+    seen: set[tuple[str, date]] = set()
+    for index, item in enumerate(raw, start=1):
+        label = f"overrides[{index}]"
+        if not isinstance(item, dict):
+            raise ConfigError(f"{label} must be a mapping.")
+        stream = str(item.get("stream") or "").strip().casefold()
+        if stream not in STREAMS:
+            raise ConfigError(f"{label}.stream must be a known collection stream.")
+        nominal = parse_iso_date(item.get("nominal_date"), f"{label}.nominal_date")
+        raw_service = item.get("service_date")
+        service = (
+            None if raw_service is None else parse_iso_date(raw_service, f"{label}.service_date")
+        )
+        expires = parse_iso_date(item.get("expires_on"), f"{label}.expires_on")
+        if expires < nominal:
+            raise ConfigError(f"{label}.expires_on must not be before nominal_date.")
+        state = str(item.get("state") or "proposed").strip().casefold()
+        if state not in OVERRIDE_STATES:
+            raise ConfigError(f"{label}.state must be proposed or confirmed.")
+        key = (stream, nominal)
+        if key in seen:
+            raise ConfigError(f"{label} duplicates a stream and nominal_date override.")
+        seen.add(key)
+        note = str(item.get("note") or "").strip()
+        parsed.append(
+            ScheduleOverride(
+                stream=stream,
+                nominal_date=nominal,
+                service_date=service,
+                expires_on=expires,
+                state=state,
+                note=note,
+            )
+        )
+    return tuple(sorted(parsed, key=lambda item: (item.nominal_date, item.stream)))
 
 
 def parse_stream(
@@ -278,6 +339,7 @@ def render_saved_config(config: AppConfig, schedule: Schedule) -> str:
     ]
     if schedule.bulky.weekdays and schedule.bulky_mode == "weekdays":
         lines.append(f"    weekdays: [{_weekday_list(schedule.bulky.weekdays)}]")
+    lines.extend(_override_lines(config.overrides))
     lines.extend(
         [
             "google_calendar:",
@@ -371,6 +433,29 @@ def _weekday_list(weekdays: tuple[int, ...]) -> str:
     from pgpickup.models import WEEKDAY_NAMES
 
     return ", ".join(WEEKDAY_NAMES[day] for day in weekdays)
+
+
+def _override_lines(overrides: tuple[ScheduleOverride, ...]) -> list[str]:
+    if not overrides:
+        return []
+    lines = ["overrides:"]
+    for override in overrides:
+        lines.extend(
+            [
+                f"  - stream: {override.stream}",
+                f"    nominal_date: '{override.nominal_date.isoformat()}'",
+                (
+                    "    service_date: null"
+                    if override.service_date is None
+                    else f"    service_date: '{override.service_date.isoformat()}'"
+                ),
+                f"    expires_on: '{override.expires_on.isoformat()}'",
+                f"    state: {override.state}",
+            ]
+        )
+        if override.note:
+            lines.append(f"    note: {json.dumps(override.note)}")
+    return lines
 
 
 def _stream_lines(
