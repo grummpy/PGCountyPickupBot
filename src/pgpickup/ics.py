@@ -55,6 +55,9 @@ class CalendarOptions:
     include_location: bool = False
     location: str | None = None
     now: datetime | None = None
+    holiday_checked: date | None = None
+    holiday_coverage_start: date | None = None
+    holiday_coverage_end: date | None = None
 
 
 def collection_start_at(service_date: date, options: CalendarOptions) -> datetime:
@@ -179,10 +182,37 @@ def description_for(occurrence: Occurrence, options: CalendarOptions) -> str:
         )
     if occurrence.stream == "yard_waste":
         lines.append("Yard trim and food scraps are collected together.")
+    lines.extend(_holiday_coverage_lines(occurrence, options))
     lines.append("Schedules change. Confirm with Prince George's County or PGC311 before the day.")
     lines.append(HOLIDAY_SCHEDULE_URL)
     lines.append(PGC311_URL)
     return "\n".join(lines)
+
+
+def _holiday_coverage_lines(occurrence: Occurrence, options: CalendarOptions) -> list[str]:
+    """Describe the curated holiday-table boundary in every exported event.
+
+    A regular weekday can still be useful outside this table, but the program
+    must not imply that its holiday treatment was verified there.
+    """
+    if (
+        options.holiday_checked is None
+        or options.holiday_coverage_start is None
+        or options.holiday_coverage_end is None
+    ):
+        return []
+    start = options.holiday_coverage_start.isoformat()
+    end = options.holiday_coverage_end.isoformat()
+    lines = [
+        "Holiday shift table checked "
+        f"{options.holiday_checked.isoformat()}; supported dates: {start} through {end}."
+    ]
+    if not (options.holiday_coverage_start <= occurrence.nominal_date <= options.holiday_coverage_end):
+        lines.append(
+            "Holiday coverage limit: this date is outside the curated table; "
+            "confirm any holiday change with the county."
+        )
+    return lines
 
 
 def _alarm_text(occurrence: Occurrence) -> str:

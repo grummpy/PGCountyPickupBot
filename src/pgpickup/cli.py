@@ -187,7 +187,7 @@ def _ics(args, config: AppConfig) -> int:
     table = load_holiday_table(config.holidays_file)
     start, end = _range(args, config)
     _schedule, occurrences = _reconciled_occurrences(config, table.holidays, start, end)
-    payload = render_ics(occurrences, _options(config))
+    payload = render_ics(occurrences, _options(config, table))
     destination = Path(args.out)
     destination.write_bytes(payload)
     print(f"Wrote {destination} ({len(occurrences)} events).")
@@ -224,7 +224,7 @@ def _push(args, config: AppConfig) -> int:
         calendar_id=config.google_calendar_id,
         timezone_name=config.timezone,
         occurrences=occurrences,
-        options=_options(config),
+        options=_options(config, table),
         apply=args.apply,
         oauth_client_file=config.google_oauth_client_file,
         token_file=config.google_token_file,
@@ -314,7 +314,9 @@ def _reconciled_occurrences(
     return schedule, list(reconciliation.occurrences)
 
 
-def _options(config: AppConfig) -> CalendarOptions:
+def _options(config: AppConfig, table=None) -> CalendarOptions:
+    coverage_start = min((item.date for item in table.holidays), default=None) if table else None
+    coverage_end = max((item.date for item in table.holidays), default=None) if table else None
     return CalendarOptions(
         timezone=config.timezone,
         reminder_time=config.reminder_time,
@@ -323,6 +325,9 @@ def _options(config: AppConfig) -> CalendarOptions:
         include_location=config.include_location,
         location=config.address if config.include_location else None,
         now=datetime.now().astimezone(),
+        holiday_checked=table.checked if table else None,
+        holiday_coverage_start=coverage_start,
+        holiday_coverage_end=coverage_end,
     )
 
 
